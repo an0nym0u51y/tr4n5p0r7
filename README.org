@@ -1,0 +1,13 @@
+#+OPTIONS: toc:nil
+
+* ~tr4n5p0r7~
+[[https://github.com/r3v2d0g/tr4n5p0r7/blob/main/LICENSE.txt][https://img.shields.io/crates/l/tr4n5p0r7.svg]]
+[[https://crates.io/crates/tr4n5p0r7][https://img.shields.io/crates/v/tr4n5p0r7.svg]]
+[[https://docs.rs/tr4n5p0r7][https://docs.rs/tr4n5p0r7/badge.svg]]
+
+** License
+#+BEGIN_QUOTE
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at http://mozilla.org/MPL/2.0/.
+#+END_QUOTE

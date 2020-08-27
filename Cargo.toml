@@ -1,0 +1,30 @@
+[package]
+name = "tr4n5p0r7"
+description = ""
+version = "0.0.0"
+homepage = "https://github.com/r3v2d0g/tr4n5p0r7"
+repository = "https://github.com/r3v2d0g/tr4n5p0r7.git"
+documentation = "https://docs.rs/tr4n5p0r7"
+keywords = []
+categories = []
+readme = "README.md"
+license = "MPL-2.0"
+authors = ["Matthieu Le brazidec (r3v2d0g) <r3v2d0g@jesus.gg>"]
+edition = "2018"
+publish = false
+
+[dependencies]
+async-channel = "1.4"
+async-oneshot = "0.3"
+async-peek = "0.3"
+async-tcp = "0.1"
+futures-lite = "1.0"
+
+[dependencies.ed25519]
+package = "ed25519-dalek"
+version = "1.0"
+
+[dependencies.protocol]
+package = "pr070c01"
+git = "https://github.com/an0nym0u51y/pr070c01.git"
+branch = "main"

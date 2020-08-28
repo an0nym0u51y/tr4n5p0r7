@@ -17,7 +17,7 @@ publish = false
 async-channel = "1.4"
 async-oneshot = "0.3"
 async-peek = "0.3"
-async-tcp = "0.1"
+async-tcp = "0.2"
 futures-lite = "1.0"
 
 [dependencies.ed25519]

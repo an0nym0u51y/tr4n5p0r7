@@ -2,8 +2,8 @@
 name = "tr4n5p0r7"
 description = ""
 version = "0.0.0"
-homepage = "https://github.com/r3v2d0g/tr4n5p0r7"
-repository = "https://github.com/r3v2d0g/tr4n5p0r7.git"
+homepage = "https://github.com/an0nym0u51y/tr4n5p0r7"
+repository = "https://git.r3vd5u3d.network/~r3v2d0g/tr4n5p0r7"
 documentation = "https://docs.rs/tr4n5p0r7"
 keywords = []
 categories = []
@@ -26,5 +26,5 @@ version = "1.0"
 
 [dependencies.protocol]
 package = "pr070c01"
-git = "https://github.com/an0nym0u51y/pr070c01.git"
+git = "https://git.r3vd5u3d.network/~r3v2d0g/pr070c01"
 branch = "main"

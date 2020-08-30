@@ -8,40 +8,62 @@
 
 // =========================================== Imports ========================================== \\
 
+pub use protocol::{self, packets};
+
 use async_channel as channel;
 use async_oneshot as oneshot;
+use async_io::Timer;
 use async_peek::AsyncPeek;
 use async_tcp::{TcpListener, TcpStream};
+use core::time::Duration;
 use futures_lite::{AsyncRead, AsyncWrite, FutureExt};
-use protocol::{self, Handshake, Protocol};
-use protocol::packets::{self, PacketId};
+use protocol::{Handshake, Packet, Protocol};
+use protocol::packets::PacketId;
 use std::io;
 use std::net::SocketAddr;
+
+#[cfg(feature = "thiserror")]
+use thiserror::Error;
 
 // ============================================ Types =========================================== \\
 
 pub struct Listener<Inner> {
+    config: Config,
     inner: Inner,
 }
 
 pub struct Connection<Inner> {
+    config: Config,
     channels: Channels,
     proto: Protocol,
     inner: Inner,
 }
 
+#[derive(Clone)]
+pub struct Config {
+    pub max_heartbeats: usize,
+    pub heartbeat_rate: Duration,
+}
+
 pub struct Channels {
-    close: Option<oneshot::Receiver<()>>,
-    hello_in: channel::Sender<packets::Hello>,
-    hello_out: channel::Sender<oneshot::Sender<packets::Hello>>,
+    pub close: Option<oneshot::Receiver<()>>,
+    pub recved: channel::Sender<Packet>,
+    pub send: channel::Receiver<Packet>,
+    pub sending: channel::Sender<(PacketId, oneshot::Sender<Packet>)>,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
 
+#[derive(Debug)]
+#[cfg_attr(feature = "thiserror", derive(Error))]
 pub enum Error {
+    #[cfg_attr(feature = "thiserror", error("connection closed"))]
     Closed,
+    #[cfg_attr(feature = "thiserror", error(""))]
     Hello,
+    #[cfg_attr(feature = "thiserror", error(""))]
     Io(io::Error),
+    #[cfg_attr(feature = "thiserror", error(""))]
     Pr070c01(protocol::Error),
 }
 
@@ -50,8 +72,9 @@ pub enum Error {
 impl<Inner: TcpListener> Listener<Inner> {
     // ==================================== Constructors ==================================== \\
 
-    pub async fn bind(addr: SocketAddr) -> Result<Self> {
+    pub async fn bind(addr: SocketAddr, config: Config) -> Result<Self> {
         Ok(Listener {
+            config,
             inner: Inner::bind(addr).await?,
         })
     }
@@ -65,19 +88,26 @@ impl<Inner: TcpListener> Listener<Inner> {
         let (stream, _) = self.inner.accept().await?;
         let handshake = Handshake::respond(&stream, &stream).await?;
         let mut conn = Connection {
+            config: self.config.clone(),
             channels,
             proto: handshake.done(),
             inner: stream,
         };
 
         // TODO: timeout
-        let hello = conn.try_recv::<packets::Hello>().await?;
-        conn.channels.hello_in.send(hello).await?;
+        if let packet @ Packet::Hello(_) = conn.recv().await? {
+            conn.channels.recved.send(packet).await.map_err(|_| Error::Hello)?;
+        } else {
+            todo!()
+        }
 
         let (sender, recver) = oneshot::oneshot();
-        conn.channels.hello_out.send(sender).await?;
-        let hello = recver.await.map_err(|_| Error::Hello)?;
-        conn.send(hello).await?;
+        conn.channels.sending.send((PacketId::Hello, sender)).await?;
+        if let packet @ Packet::Hello(_) = recver.await.map_err(|_| Error::Hello)? {
+            conn.send(packet).await?;
+        } else {
+            todo!()
+        }
 
         Ok(conn)
     }
@@ -91,23 +121,30 @@ where
 {
     // ==================================== Constructors ==================================== \\
 
-    pub async fn connect(addr: SocketAddr, channels: Channels) -> Result<Self> {
+    pub async fn connect(addr: SocketAddr, config: Config, channels: Channels) -> Result<Self> {
         let stream = Inner::connect(addr).await?;
         let handshake = Handshake::initiate(&stream, &stream).await?;
         let mut conn = Connection {
+            config,
             channels,
             proto: handshake.done(),
             inner: stream,
         };
 
         let (sender, recver) = oneshot::oneshot();
-        conn.channels.hello_out.send(sender).await?;
-        let hello = recver.await.map_err(|_| Error::Hello)?;
-        conn.send(hello).await?;
+        conn.channels.sending.send((PacketId::Hello, sender)).await?;
+        if let packet @ Packet::Hello(_) = recver.await.map_err(|_| Error::Hello)? {
+            conn.send(packet).await?;
+        } else {
+            todo!()
+        }
 
         // TODO: timeout
-        let hello = conn.try_recv::<packets::Hello>().await?;
-        conn.channels.hello_in.send(hello).await?;
+        if let packet @ Packet::Hello(_) = conn.recv().await? {
+            conn.channels.recved.send(packet).await.map_err(|_| Error::Hello)?;
+        } else {
+            todo!()
+        }
 
         Ok(conn)
     }
@@ -116,35 +153,41 @@ where
 
     pub async fn run(mut self) -> Result<()> {
         let mut close = self.channels.close.take().unwrap();
+        let mut heartbeat = Timer::after(self.config.heartbeat_rate);
+        let mut heartbeats = 0;
 
         loop {
             match async {
                 let _ = (&mut close).await;
                 Err(Error::Closed)
-            }.or(self.peek_packet_id()).await? {
-                PacketId::Heartbeat => todo!(),
-                PacketId::Hello => {
-                    let hello = self.try_recv::<packets::Hello>().await?;
-                    self.channels.hello_in.send(hello).await?;
+            }.or(async {
+                (&mut heartbeat).await;
+                Ok(None)
+            }).or(async {
+                let packet = self.recv().await?;
+                Ok(Some(packet))
+            }).await? {
+                Some(Packet::Heartbeat(_)) => heartbeats = 0,
+                Some(Packet::Hello(_)) => todo!(),
+                None if heartbeats > self.config.max_heartbeats => todo!(),
+                None => {
+                    self.send(Packet::heartbeat()).await?;
 
-                    todo!()
-                },
+                    heartbeat.set_after(self.config.heartbeat_rate);
+                    heartbeats += 1;
+                }
             }
         }
     }
 
     // ===================================== Read+Write ===================================== \\
 
-    async fn send<Packet: packets::Packet>(&mut self, packet: Packet) -> Result<usize> {
+    async fn send(&mut self, packet: Packet) -> Result<usize> {
         Ok(self.proto.send(&self.inner, packet).await?)
     }
 
-    async fn try_recv<Packet: packets::Packet>(&mut self) -> Result<Packet> {
-        Ok(self.proto.try_recv(&self.inner).await?)
-    }
-
-    async fn peek_packet_id(&mut self) -> Result<PacketId> {
-        Ok(self.proto.peek_packet_id(&self.inner).await?)
+    async fn recv(&mut self) -> Result<Packet> {
+        Ok(self.proto.recv(&self.inner).await?)
     }
 }
 
@@ -157,10 +200,13 @@ impl From<channel::SendError<packets::Hello>> for Error {
     }
 }
 
-impl From<channel::SendError<oneshot::Sender<packets::Hello>>> for Error {
+impl From<channel::SendError<(PacketId, oneshot::Sender<Packet>)>> for Error {
     #[inline]
-    fn from(_: channel::SendError<oneshot::Sender<packets::Hello>>) -> Self {
-        Error::Hello
+    fn from(error: channel::SendError<(PacketId, oneshot::Sender<Packet>)>) -> Self {
+        match error.into_inner().0 {
+            PacketId::Heartbeat => todo!(),
+            PacketId::Hello => Error::Hello,
+        }
     }
 }
 
